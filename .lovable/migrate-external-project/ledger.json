@@ -1,0 +1,6 @@
+[
+ {"capability":"code","source":"agrisense_ethiopia_platform.tsx","outcome":"migrate","status":"done","next_action":"none"},
+ {"capability":"schema/records","source":"in-file mock datasets only","outcome":"kept as bundled sample data","status":"verified-absent","next_action":"none"},
+ {"capability":"auth","source":"none detected","outcome":"n/a","status":"verified-absent","next_action":"none"},
+ {"capability":"external providers/secrets/endpoints","source":"none detected","outcome":"n/a","status":"verified-absent","next_action":"none"}
+]
