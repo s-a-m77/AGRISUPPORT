@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   LogOut,
+  CircleHelp,
 } from "lucide-react";
 
 import { useTx } from "@/lib/i18n";
@@ -164,6 +165,18 @@ export function AppShell() {
       </nav>
 
       <div className="p-3 border-t border-app-nav-ink/10 space-y-2">
+        <Link
+          to="/help"
+          onClick={() => setMobileMenuOpen(false)}
+          className={`w-full flex items-center space-x-3 px-3.5 py-2 rounded-xl text-sm font-medium transition-all ${
+            isActive("/help")
+              ? "bg-app-success-fill text-app-on-action"
+              : "text-app-nav-ink/70 hover:bg-app-nav-ink/10 hover:text-app-nav-ink"
+          }`}
+        >
+          <CircleHelp className="w-4 h-4" />
+          <span>{tx("Help Center")}</span>
+        </Link>
         <Link
           to="/settings"
           onClick={() => setMobileMenuOpen(false)}

@@ -5,13 +5,19 @@ import {
   chooseActiveFarm,
   editFarm,
   getFarmerProfile,
+  getFarmPower,
+  getDashboardTelemetry,
+  getSatelliteHistory,
+  getSatelliteSummary,
   listAlerts,
+  markAllAlertsRead,
   listFarms,
   markAlertRead,
   removeFarm,
   saveFarmerProfile,
 } from "@/lib/agrisense.functions";
 import type { Farm, FarmAlert, FarmerProfile } from "@/lib/farm-data";
+import type { FarmPower } from "@/lib/agrisense.functions";
 
 export { pickActiveFarm } from "@/lib/farm-data";
 
@@ -19,6 +25,8 @@ export const appKeys = {
   profile: ["farmer-profile"] as const,
   farms: ["farms"] as const,
   alerts: ["alerts"] as const,
+  power: (farmId: string) => ["farm-power", farmId] as const,
+  satellite: (farmId: string) => ["satellite", farmId] as const,
 };
 
 export function profileQueryOptions() {
@@ -26,6 +34,22 @@ export function profileQueryOptions() {
     queryKey: appKeys.profile,
     queryFn: () => getFarmerProfile(),
     staleTime: 30_000,
+  });
+}
+
+export function satelliteSummaryQueryOptions(farmId: string) {
+  return queryOptions({
+    queryKey: appKeys.satellite(farmId),
+    queryFn: () => getSatelliteSummary({ data: { farmId } }),
+    staleTime: 15 * 60_000,
+  });
+}
+
+export function satelliteHistoryQueryOptions(farmId: string) {
+  return queryOptions({
+    queryKey: [...appKeys.satellite(farmId), "history"],
+    queryFn: () => getSatelliteHistory({ data: { farmId } }),
+    staleTime: 15 * 60_000,
   });
 }
 
@@ -42,6 +66,27 @@ export function alertsQueryOptions() {
     queryKey: appKeys.alerts,
     queryFn: () => listAlerts(),
     staleTime: 15_000,
+  });
+}
+
+export function farmPowerQueryOptions(farmId: string) {
+  return queryOptions({
+    queryKey: appKeys.power(farmId),
+    queryFn: () =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        farmId,
+      )
+        ? getFarmPower({ data: { farmId } })
+        : Promise.resolve(null),
+    staleTime: 15 * 60_000,
+  });
+}
+
+export function dashboardTelemetryQueryOptions(farmId?: string) {
+  return queryOptions({
+    queryKey: ["dashboard-telemetry", farmId ?? "default"] as const,
+    queryFn: () => getDashboardTelemetry({ data: farmId ? { farmId } : {} }),
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -111,4 +156,13 @@ export function useMarkAlertRead() {
   });
 }
 
+export function useMarkAllAlertsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => markAllAlertsRead(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: appKeys.alerts }),
+  });
+}
+
 export type { Farm, FarmAlert, FarmerProfile };
+export type { FarmPower };

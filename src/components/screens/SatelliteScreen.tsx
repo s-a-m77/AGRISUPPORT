@@ -1,122 +1,81 @@
-import { useState } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { useEffect, useState } from "react";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 
 import { MapCanvas } from "@/components/app/MapCanvas";
-import { HISTORICAL_NDVI_DATA } from "@/lib/farm-data";
-import { farmsQueryOptions, pickActiveFarm, profileQueryOptions } from "@/lib/queries";
+import { farmPowerQueryOptions, farmsQueryOptions, pickActiveFarm, profileQueryOptions, satelliteSummaryQueryOptions } from "@/lib/queries";
 
-const LAYERS = ["True Color", "NDVI", "Vegetation Health", "Historical Baseline"];
+const LAYERS = [
+  { label: "MODIS True Color", map: "True Color", source: "MODIS Terra", resolution: "250 m" },
+  { label: "MODIS NDVI", map: "NDVI", source: "MODIS Terra", resolution: "250 m" },
+  { label: "GPM IMERG Rainfall", map: "Rainfall", source: "GPM IMERG", resolution: "10 km" },
+  { label: "VIIRS", map: "Vegetation Health", source: "VIIRS", resolution: "375 m" },
+] as const;
 
 export function SatelliteScreen() {
   const { data: farms } = useSuspenseQuery(farmsQueryOptions());
   const { data: profile } = useSuspenseQuery(profileQueryOptions());
   const farm = pickActiveFarm(farms, profile.activeFarmId);
+  const [activeLayer, setActiveLayer] = useState<(typeof LAYERS)[number]["map"]>("NDVI");
+  const [date, setDate] = useState<string>();
+  const summary = useQuery({
+    ...satelliteSummaryQueryOptions(farm?.id ?? ""),
+    enabled: Boolean(farm),
+  });
+  const power = useQuery({
+    ...farmPowerQueryOptions(farm?.id ?? ""),
+    enabled: Boolean(farm),
+  });
+  const selected = LAYERS.find((layer) => layer.map === activeLayer) ?? LAYERS[1];
 
-  const [activeLayer, setActiveLayer] = useState("NDVI");
-  const satelliteSource = "Landsat 9";
+  useEffect(() => {
+    const observationDate = summary.data?.latestModis?.observedOn;
+    if (observationDate && !date) setDate(observationDate);
+  }, [date, summary.data?.latestModis?.observedOn]);
+
+  if (!farm) {
+    return <div className="rounded-2xl border border-app-ink/10 bg-app-surface p-8 text-sm text-app-ink/70">Register a farm with a boundary or coordinates to view NASA satellite imagery.</div>;
+  }
+
+  const latest = summary.data?.latestModis;
+  const rainfall = power.data?.days.reduce((total, day) => total + (day.precipitationMm ?? 0), 0);
 
   return (
     <div className="space-y-6 pb-12">
-      <div className="bg-app-surface rounded-2xl p-5 border border-app-ink/10 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-app-heading">Satellite Vegetation Intelligence</h1>
-          <p className="text-xs text-app-ink/70">
-            Multispectral imagery telemetry for{" "}
-            <span className="font-bold text-app-success">{farm?.name ?? "your plots"}</span>
-          </p>
-        </div>
+      <header className="rounded-2xl border border-app-ink/10 bg-app-surface p-5 shadow-sm">
+        <h1 className="text-2xl font-bold text-app-heading">Satellite Vegetation Intelligence</h1>
+        <p className="mt-1 text-xs text-app-ink/70">NASA GIBS visualizations and farm-specific observations for <strong>{farm.name}</strong>.</p>
+      </header>
 
-        <div className="flex flex-wrap items-center gap-1.5 bg-app-bg p-1 rounded-xl border border-app-ink/10 text-xs">
+      <section className="space-y-4 rounded-2xl border border-app-ink/10 bg-app-surface p-5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
           {LAYERS.map((layer) => (
-            <button
-              key={layer}
-              onClick={() => setActiveLayer(layer)}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                activeLayer === layer
-                  ? "bg-app-action text-app-on-action shadow-sm"
-                  : "text-app-ink/70 hover:text-app-heading"
-              }`}
-            >
-              {layer}
+            <button key={layer.map} onClick={() => setActiveLayer(layer.map)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${activeLayer === layer.map ? "bg-app-action text-app-on-action" : "bg-app-bg text-app-ink/70"}`}>
+              {layer.label}
             </button>
           ))}
+          <label className="ml-auto text-xs text-app-ink/70">Observation date <input type="date" value={date ?? ""} onChange={(event) => setDate(event.target.value || undefined)} className="ml-1 rounded border border-app-line bg-app-surface px-2 py-1" /></label>
         </div>
-      </div>
+        <MapCanvas farm={farm} layerType={activeLayer} date={date} />
+        <p className="text-[11px] text-app-ink/60">
+          NASA GIBS / {selected.source} • {selected.resolution}.{" "}
+          {date ? `Observation date: ${date}.` : "No valid observation date is available yet."} Map colors are imagery only and are not numeric NDVI measurements.
+        </p>
+      </section>
 
-      <div className="bg-app-surface rounded-2xl p-5 border border-app-ink/10 shadow-sm space-y-4">
-        <div className="flex items-center justify-between text-xs text-app-ink/70">
-          <span>
-            Satellite Source:{" "}
-            <strong className="text-app-heading">{satelliteSource} (30m Spatial Resolution)</strong>
-          </span>
-          <span>
-            Cloud Cover: <strong className="text-app-success">0.4% Optimal Tile Quality</strong>
-          </span>
-        </div>
+      <section className="grid gap-3 md:grid-cols-3">
+        <Metric title="Latest MODIS NDVI" value={latest?.ndvi == null ? "--" : Number(latest.ndvi).toFixed(3)} detail={latest ? `${latest.observedOn} • ${latest.qualityStatus ?? "quality unavailable"}` : "No processed MOD13Q1 observation"} />
+        <Metric title="30-day NASA POWER rainfall" value={rainfall == null ? "--" : `${rainfall.toFixed(1)} mm`} detail="Regional estimate; not a rain-gauge reading" />
+        <Metric title="HLS NDVI" value={summary.data?.latestHls?.ndvi == null ? "--" : Number(summary.data.latestHls.ndvi).toFixed(3)} detail="30 m observation unavailable until processing completes" />
+      </section>
 
-        <MapCanvas farm={farm} layerType={activeLayer} />
-      </div>
-
-      <div className="bg-app-surface rounded-2xl p-5 border border-app-ink/10 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b pb-3">
-          <div>
-            <h2 className="text-base font-bold text-app-heading">
-              NDVI Season Trajectory vs 5-Year Historical Average
-            </h2>
-            <p className="text-xs text-app-ink/60">
-              Normalised Difference Vegetation Index trajectory across crop lifecycle.
-            </p>
-          </div>
-          <span className="text-xs font-bold text-app-success bg-app-soft px-3 py-1 rounded-full">
-            Current Index: {farm ? farm.ndvi.toFixed(2) : "--"} (
-            {farm ? farm.ndviChange : "no plot"})
-          </span>
-        </div>
-
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={HISTORICAL_NDVI_DATA}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--app-line)" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis domain={[0, 1.0]} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="current2026"
-                stroke="var(--app-success)"
-                strokeWidth={3}
-                name="2026 Current Season NDVI"
-                dot={{ r: 5 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="baseline5Yr"
-                stroke="var(--app-gold)"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                name="5-Year Historical Mean"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="p-4 bg-app-soft rounded-xl border border-app-success/20 text-xs text-app-heading leading-relaxed">
-          <strong>NDVI Educational Note:</strong> NDVI measures canopy greenness between -1.0 and
-          +1.0. Values between 0.6 and 0.8 represent healthy, dense agricultural vegetation during
-          peak grain filling for Ethiopian crops like Teff and Wheat.
-        </div>
-      </div>
+      <button className="inline-flex items-center gap-2 rounded-xl bg-app-success-fill px-4 py-2 text-xs font-bold text-app-on-action" disabled>
+        <RefreshCw className="size-3.5" /> Refresh requires Earthdata processing credentials
+      </button>
     </div>
   );
+}
+
+function Metric({ title, value, detail }: { title: string; value: string; detail: string }) {
+  return <div className="rounded-xl border border-app-ink/10 bg-app-surface p-4 shadow-sm"><p className="text-xs font-bold text-app-ink/70">{title}</p><p className="mt-2 text-2xl font-extrabold text-app-heading">{value}</p><p className="mt-1 text-[11px] text-app-ink/60">{detail}</p></div>;
 }

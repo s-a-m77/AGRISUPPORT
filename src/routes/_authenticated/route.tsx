@@ -2,14 +2,14 @@ import { createFileRoute, redirect, Outlet } from "@tanstack/react-router";
 import { Suspense } from "react";
 
 import { AppShell } from "@/components/app/AppShell";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { alertsQueryOptions, farmsQueryOptions, profileQueryOptions } from "@/lib/queries";
 
 export const Route = createFileRoute("/_authenticated")({
   // The session lives in browser storage, so this subtree renders client-side only.
   ssr: false,
   beforeLoad: async () => {
-    const { data } = await supabase.auth.getUser();
+    const { data } = await api.auth.getUser();
     if (!data.user) throw redirect({ to: "/auth", replace: true });
   },
   loader: async ({ context }) => {

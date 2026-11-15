@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Database } from "@/integrations/supabase/types";
+import { requireApiAuth } from "@/integrations/api/auth-middleware";
 import {
   AGRICULTURAL_ROLES,
   type AgriculturalRole,
@@ -10,45 +10,6 @@ import {
   type FarmAlert,
   type FarmerProfile,
 } from "@/lib/farm-data";
-
-type FarmRow = Database["public"]["Tables"]["farms"]["Row"];
-type AlertRow = Database["public"]["Tables"]["alerts"]["Row"];
-
-function toFarm(row: FarmRow): Farm {
-  return {
-    id: row.id,
-    name: row.name,
-    region: row.region,
-    zone: row.zone,
-    woreda: row.woreda,
-    crop: row.crop,
-    sizeHectares: Number(row.size_hectares),
-    irrigation: row.irrigation,
-    plantingDate: row.planting_date,
-    ndvi: Number(row.ndvi),
-    ndviChange: row.ndvi_change,
-    healthStatus: row.health_status,
-    moisture: row.moisture,
-    droughtRisk: row.drought_risk,
-    latitude: row.latitude === null ? null : Number(row.latitude),
-    longitude: row.longitude === null ? null : Number(row.longitude),
-    lastObservation: row.last_observation,
-  };
-}
-
-function toAlert(row: AlertRow): FarmAlert {
-  return {
-    id: row.id,
-    title: row.title,
-    farmName: row.farm_name,
-    severity: row.severity,
-    category: row.category,
-    evidence: row.evidence,
-    recommendation: row.recommendation,
-    read: row.is_read,
-    occurredOn: row.occurred_on,
-  };
-}
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(2, "Enter your full name").max(80),
@@ -64,205 +25,241 @@ const farmSchema = z.object({
   woreda: z.string().trim().max(60),
   sizeHectares: z.coerce.number().positive("Size must be above zero").max(100000),
   irrigation: z.string().trim().min(2).max(60),
+  plantingDate: z.string().optional(),
+  description: z.string().trim().max(2000).optional(),
+  farmType: z.string().trim().max(80).optional(),
+  ownershipInfo: z.string().trim().max(200).optional(),
+  mappingMethod: z.enum(["gps", "manual"]).optional(),
+  boundaryGeojson: z
+    .object({
+      type: z.literal("Polygon"),
+      coordinates: z.array(z.array(z.tuple([z.number(), z.number()]))),
+    })
+    .nullable()
+    .optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 });
 
 const editFarmSchema = farmSchema.extend({ id: z.string().uuid() });
 
-export const getFarmerProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<FarmerProfile> => {
-    const { supabase, userId } = context;
-
-    const [profileResult, roleResult] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("display_name, language, active_farm_id")
-        .eq("id", userId)
-        .maybeSingle(),
-      supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId)
-        .order("created_at")
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-    if (profileResult.error) throw new Error(profileResult.error.message);
-    if (roleResult.error) throw new Error(roleResult.error.message);
-
-    const role = (roleResult.data?.role ?? "farmer") as AgriculturalRole;
-
-    return {
-      displayName: profileResult.data?.display_name ?? "Farmer",
-      language: profileResult.data?.language ?? "English",
-      role: AGRICULTURAL_ROLES.includes(role) ? role : "farmer",
-      activeFarmId: profileResult.data?.active_farm_id ?? null,
-    };
+async function backendRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const authorization = getRequest()?.headers.get("authorization");
+  const baseUrl = process.env.API_URL ?? "http://localhost:3000/api";
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(authorization ? { authorization } : {}),
+      ...init?.headers,
+    },
   });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      body && typeof body === "object" && "message" in body
+        ? String(body.message)
+        : "Backend request failed.";
+    throw new Error(message);
+  }
+  return body as T;
+}
+
+function mapFarm(row: Farm): Farm {
+  return {
+    ...row,
+    sizeHectares: Number(row.sizeHectares),
+    ndvi: Number(row.ndvi),
+    latitude: row.latitude === null ? null : Number(row.latitude),
+    longitude: row.longitude === null ? null : Number(row.longitude),
+  };
+}
+
+function mapAlert(row: FarmAlert & { isRead?: boolean }): FarmAlert {
+  return {
+    ...row,
+    read: row.read ?? row.isRead ?? false,
+  };
+}
+
+export const getFarmerProfile = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .handler(() => backendRequest<FarmerProfile>("/data/profile"));
 
 export const saveFarmerProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: unknown) => profileSchema.parse(input))
-  .handler(async ({ data, context }): Promise<FarmerProfile> => {
-    const { supabase, userId } = context;
-
-    const profileResult = await supabase
-      .from("profiles")
-      .update({
-        display_name: data.displayName,
-        language: data.language,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
-    if (profileResult.error) throw new Error(profileResult.error.message);
-
-    const roleResult = await supabase
-      .from("user_roles")
-      .upsert({ user_id: userId, role: data.role }, { onConflict: "user_id,role" });
-    if (roleResult.error) throw new Error(roleResult.error.message);
-
-    // Only one focus may be active, so any other declared focus is dropped.
-    const dropResult = await supabase
-      .from("user_roles")
-      .delete()
-      .eq("user_id", userId)
-      .neq("role", data.role);
-    if (dropResult.error) throw new Error(dropResult.error.message);
-
-    return {
-      displayName: data.displayName,
-      language: data.language,
-      role: data.role,
-      activeFarmId: null,
-    };
-  });
+  .handler(({ data }) =>
+    backendRequest<FarmerProfile>("/data/profile", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  );
 
 export const chooseActiveFarm = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: { farmId: string }) =>
     z.object({ farmId: z.string().uuid() }).parse(input),
   )
-  .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-
-    // RLS makes this a no-op for a plot the caller does not own.
-    const owned = await supabase.from("farms").select("id").eq("id", data.farmId).maybeSingle();
-    if (owned.error) throw new Error(owned.error.message);
-    if (!owned.data) throw new Error("That plot is not in your account.");
-
-    const result = await supabase
-      .from("profiles")
-      .update({ active_farm_id: data.farmId, updated_at: new Date().toISOString() })
-      .eq("id", userId);
-    if (result.error) throw new Error(result.error.message);
-    return { ok: true };
-  });
+  .handler(({ data }) =>
+    backendRequest("/data/profile/active-farm/" + data.farmId, { method: "POST" }),
+  );
 
 export const listFarms = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<Farm[]> => {
-    const { supabase } = context;
-    const result = await supabase
-      .from("farms")
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (result.error) throw new Error(result.error.message);
-    return (result.data ?? []).map(toFarm);
-  });
+  .middleware([requireApiAuth])
+  .handler(async () => (await backendRequest<Farm[]>("/data/farms")).map(mapFarm));
+
+export type DashboardTelemetry = {
+  coordinates: { latitude: number; longitude: number };
+  rainfallMm: number;
+  soilMoisturePercent: number | null;
+  temperatureC: number | null;
+  rainfallTrend: string;
+  soilMoistureTrend: string;
+  source: "NASA POWER";
+};
+
+export const getDashboardTelemetry = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .inputValidator((input: { farmId?: string }) =>
+    z.object({ farmId: z.string().uuid().optional() }).parse(input),
+  )
+  .handler(({ data }) =>
+    backendRequest<DashboardTelemetry>(
+      `/data/dashboard-telemetry${data.farmId ? `?farmId=${data.farmId}` : ""}`,
+    ),
+  );
+
+export type FarmPower = {
+  farmId: string;
+  farmName: string;
+  coordinates: {
+    latitude: number;
+    longitude: number;
+    source: "boundary-centroid" | "farm-location";
+  };
+  source: string;
+  timeStandard: string;
+  units: {
+    temperatureC: string;
+    maximumTemperatureC: string;
+    minimumTemperatureC: string;
+    precipitationMm: string;
+    relativeHumidity: string;
+    solarRadiation: string;
+    windSpeed: string;
+    transpirationMm: string;
+    soilWetness: string;
+  };
+  days: Array<{
+    date: string;
+    temperatureC: number | null;
+    maximumTemperatureC: number | null;
+    minimumTemperatureC: number | null;
+    precipitationMm: number | null;
+    relativeHumidity: number | null;
+    solarRadiation: number | null;
+    windSpeed: number | null;
+    transpirationMm: number | null;
+    soilWetness: number | null;
+  }>;
+  fetchedAt: string;
+};
+
+export const getFarmPower = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .inputValidator((input: { farmId: string }) =>
+    z.object({ farmId: z.string().uuid() }).parse(input),
+  )
+  .handler(({ data }) => backendRequest<FarmPower>(`/data/farms/${data.farmId}/power`));
+
+export type SatelliteLayerCatalog = {
+  wmsUrl: string;
+  wmtsUrl: string;
+  layers: Array<{ id: string; title: string; resolution: string }>;
+  note: string;
+};
+
+export type SatelliteSummary = {
+  latestModis: FarmObservation | null;
+  latestHls: FarmObservation | null;
+  latestGpm: FarmObservation | null;
+  observations: FarmObservation[];
+};
+
+export type FarmObservation = {
+  id: string;
+  farmId: string;
+  observedOn: string;
+  ndvi: number | null;
+  rainfallMm: number | null;
+  source: string;
+  productId: string | null;
+  retrievedAt: string | null;
+  validPixelCount: number | null;
+  qualityStatus: string | null;
+  spatialResolution: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+export const getSatelliteLayers = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .inputValidator((input: { farmId: string }) => z.object({ farmId: z.string().uuid() }).parse(input))
+  .handler(({ data }) => backendRequest<SatelliteLayerCatalog>(`/farms/${data.farmId}/satellite/layers`));
+
+export const getSatelliteSummary = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .inputValidator((input: { farmId: string }) => z.object({ farmId: z.string().uuid() }).parse(input))
+  .handler(({ data }) => backendRequest<SatelliteSummary>(`/farms/${data.farmId}/satellite/summary`));
+
+export const getSatelliteHistory = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .inputValidator((input: { farmId: string; page?: number }) => z.object({ farmId: z.string().uuid(), page: z.number().optional() }).parse(input))
+  .handler(({ data }) => backendRequest<{ items: FarmObservation[]; total: number }>(`/farms/${data.farmId}/satellite/history?page=${data.page ?? 1}`));
 
 export const addFarm = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: unknown) => farmSchema.parse(input))
-  .handler(async ({ data, context }): Promise<Farm> => {
-    const { supabase, userId } = context;
-    const result = await supabase
-      .from("farms")
-      .insert({
-        owner_id: userId,
-        name: data.name,
-        crop: data.crop,
-        region: data.region,
-        zone: data.zone,
-        woreda: data.woreda,
-        size_hectares: data.sizeHectares,
-        irrigation: data.irrigation,
-      })
-      .select("*")
-      .single();
-    if (result.error) throw new Error(result.error.message);
-    return toFarm(result.data);
-  });
+  .handler(({ data }) =>
+    backendRequest<Farm>("/data/farms", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then(mapFarm),
+  );
 
 export const editFarm = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: unknown) => editFarmSchema.parse(input))
-  .handler(async ({ data, context }): Promise<Farm> => {
-    const { supabase } = context;
+  .handler(({ data }) => {
     const { id, ...fields } = data;
-    const result = await supabase
-      .from("farms")
-      .update({
-        name: fields.name,
-        crop: fields.crop,
-        region: fields.region,
-        zone: fields.zone,
-        woreda: fields.woreda,
-        size_hectares: fields.sizeHectares,
-        irrigation: fields.irrigation,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .select("*")
-      .maybeSingle();
-    if (result.error) throw new Error(result.error.message);
-    if (!result.data) throw new Error("That plot is not in your account.");
-    return toFarm(result.data);
+    return backendRequest<Farm>(`/data/farms/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }).then(mapFarm);
   });
 
 export const removeFarm = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: { id: string }) => z.object({ id: z.string().uuid() }).parse(input))
-  .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const result = await supabase.from("farms").delete().eq("id", data.id);
-    if (result.error) throw new Error(result.error.message);
-
-    // If the removed plot was the active one, fall back to another owned plot.
-    const remaining = await supabase
-      .from("farms")
-      .select("id")
-      .order("created_at")
-      .limit(1)
-      .maybeSingle();
-    if (remaining.error) throw new Error(remaining.error.message);
-    const fallback = await supabase
-      .from("profiles")
-      .update({ active_farm_id: remaining.data?.id ?? null, updated_at: new Date().toISOString() })
-      .eq("id", userId);
-    if (fallback.error) throw new Error(fallback.error.message);
-    return { ok: true, activeFarmId: remaining.data?.id ?? null };
-  });
+  .handler(({ data }) => backendRequest(`/data/farms/${data.id}`, { method: "DELETE" }));
 
 export const listAlerts = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<FarmAlert[]> => {
-    const { supabase } = context;
-    const result = await supabase
-      .from("alerts")
-      .select("*")
-      .order("occurred_on", { ascending: false })
-      .order("created_at", { ascending: false });
-    if (result.error) throw new Error(result.error.message);
-    return (result.data ?? []).map(toAlert);
-  });
+  .middleware([requireApiAuth])
+  .handler(async () =>
+    (await backendRequest<(FarmAlert & { isRead?: boolean })[]>("/data/alerts")).map(mapAlert),
+  );
 
 export const markAlertRead = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireApiAuth])
   .inputValidator((input: { id: string }) => z.object({ id: z.string().uuid() }).parse(input))
-  .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const result = await supabase.from("alerts").update({ is_read: true }).eq("id", data.id);
-    if (result.error) throw new Error(result.error.message);
-    return { ok: true };
-  });
+  .handler(({ data }) =>
+    backendRequest(`/data/alerts/${data.id}/read`, {
+      method: "PATCH",
+    }),
+  );
+
+export const markAllAlertsRead = createServerFn({ method: "POST" })
+  .middleware([requireApiAuth])
+  .handler(() => backendRequest("/data/alerts/read-all", { method: "PATCH" }));
+
+export type { AgriculturalRole };

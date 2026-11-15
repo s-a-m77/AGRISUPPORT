@@ -3,13 +3,14 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
 
-import { alertsQueryOptions, useMarkAlertRead } from "@/lib/queries";
+import { alertsQueryOptions, useMarkAlertRead, useMarkAllAlertsRead } from "@/lib/queries";
 
 const CATEGORIES = ["All", "Soil Moisture", "Crop Maturation", "Temperature"];
 
 export function AlertsScreen() {
   const { data: alerts } = useSuspenseQuery(alertsQueryOptions());
   const markRead = useMarkAlertRead();
+  const markAllRead = useMarkAllAlertsRead();
   const [filterCategory, setFilterCategory] = useState("All");
 
   const visible =
@@ -38,6 +39,18 @@ export function AlertsScreen() {
             </button>
           ))}
         </div>
+        <button
+          onClick={() =>
+            markAllRead.mutate(undefined, {
+              onSuccess: () => toast.success("All alerts marked as read"),
+              onError: (error) => toast.error(error.message),
+            })
+          }
+          disabled={markAllRead.isPending || !alerts.some((alert) => !alert.read)}
+          className="rounded-xl bg-app-success-fill px-4 py-2.5 text-xs font-bold text-app-on-action shadow transition disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Mark all as read
+        </button>
       </div>
 
       <div className="space-y-4">

@@ -22,3 +22,15 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Backend API
+
+The NestJS backend lives in [`backend/`](./backend) and uses PostgreSQL.
+Follow [`backend/README.md`](./backend/README.md) to start the API and its
+local database.
+
+## PostgreSQL storage
+
+Authentication, farmer profiles, farms, and alerts are stored in PostgreSQL
+through the NestJS API. No Supabase storage or authentication configuration is
+required.

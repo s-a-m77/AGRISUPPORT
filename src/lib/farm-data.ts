@@ -1,5 +1,4 @@
 // Browser-safe module: shared shapes, option lists and chart datasets.
-// Keep it free of Supabase imports so route files can load it during SSR.
 
 export type Farm = {
   id: string;
@@ -19,6 +18,13 @@ export type Farm = {
   latitude: number | null;
   longitude: number | null;
   lastObservation: string;
+  description?: string;
+  farmType?: string;
+  ownershipInfo?: string | null;
+  mappingMethod?: "gps" | "manual";
+  boundaryGeojson?: { type: "Polygon"; coordinates: [number, number][][] } | null;
+  areaSquareMeters?: number | null;
+  perimeterMeters?: number | null;
 };
 
 export type FarmAlert = {

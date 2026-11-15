@@ -1,0 +1,27 @@
+export default () => ({
+  nodeEnv: process.env.NODE_ENV,
+  port: Number.parseInt(process.env.PORT!, 10),
+  database: {
+    host: process.env.DATABASE_HOST!,
+    port: Number.parseInt(process.env.DATABASE_PORT!, 10),
+    username: process.env.DATABASE_USER!,
+    password: process.env.DATABASE_PASSWORD!,
+    name: process.env.DATABASE_NAME!,
+  },
+  frontendUrl: process.env.FRONTEND_URL!,
+  jwtSecret: process.env.JWT_SECRET!,
+  geminiApiKey: process.env.GEMINI_API_KEY?.trim(),
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+  provider: process.env.PROVIDER?.trim().toLowerCase() || "gemini",
+  openrouterApiKey: process.env.OPENROUTER_API_KEY?.trim(),
+  openrouterModel:
+    process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto",
+  addisAiApiKey: process.env.ADDIS_AI_API_KEY?.trim() || process.env.Addis_AI?.trim(),
+  addisAiBaseUrl: process.env.ADDIS_AI_BASE_URL?.trim() || "https://api.addisassistant.com",
+  nasaEarthdataToken: process.env.NASA_EARTHDATA_TOKEN?.trim(),
+  nasaGibsWmsUrl: process.env.NASA_GIBS_WMS_URL?.trim(),
+  nasaGibsWmtsUrl: process.env.NASA_GIBS_WMTS_URL?.trim(),
+  nasaCmrStacUrl: process.env.NASA_CMR_STAC_URL?.trim(),
+  geeProjectId: process.env.GEE_PROJECT_ID?.trim(),
+  geeCredentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim(),
+});

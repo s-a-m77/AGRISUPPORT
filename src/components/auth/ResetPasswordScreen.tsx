@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Sprout } from "lucide-react";
 
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 
 const inputClass =
   "w-full px-3 py-2.5 rounded-xl border border-app-ink/20 bg-app-bg text-sm focus:ring-2 focus:ring-app-success focus:outline-none";
@@ -19,15 +19,15 @@ export function ResetPasswordScreen() {
 
   // The recovery link carries the new session in the URL hash; wait for it before asking for a password.
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") setReady(true);
+    const subscription = api.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN") setReady(true);
     });
 
-    void supabase.auth.getSession().then(({ data: sessionData }) => {
+    void api.auth.getSession().then(({ data: sessionData }) => {
       if (sessionData.session) setReady(true);
     });
 
-    return () => data.subscription.unsubscribe();
+    return () => subscription.data.subscription.unsubscribe();
   }, []);
 
   async function handleSubmit(event: React.FormEvent) {
@@ -43,9 +43,10 @@ export function ResetPasswordScreen() {
 
     setBusy(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        toast.error(error.message);
+      try {
+        await api.auth.updateUser({ password });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Password update failed.");
         return;
       }
       toast.success("Password updated. You are signed in.");

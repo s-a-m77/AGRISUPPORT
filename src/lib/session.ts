@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 
 /**
  * Signs the farmer out and leaves the protected area.
@@ -14,7 +14,7 @@ export function useSignOut() {
   return async function signOut() {
     await queryClient.cancelQueries();
     queryClient.clear();
-    await supabase.auth.signOut();
+    await api.auth.signOut();
     await navigate({ to: "/auth", replace: true });
   };
 }

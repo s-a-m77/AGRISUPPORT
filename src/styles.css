@@ -9,6 +9,28 @@
 @source "../src";
 @import "tw-animate-css";
 
+@media print {
+  aside,
+  nav,
+  header,
+  button,
+  select,
+  input {
+    display: none !important;
+  }
+
+  body,
+  main,
+  .bg-app-bg {
+    background: white !important;
+  }
+
+  .bg-app-surface {
+    box-shadow: none !important;
+    border-color: #d1d5db !important;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /*

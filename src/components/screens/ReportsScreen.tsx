@@ -31,7 +31,8 @@ export function ReportsScreen() {
       toast.error("Register a plot before exporting a report.");
       return;
     }
-    toast.success(`Exporting ${reportType} PDF summary for ${farm.name}...`);
+    toast.success("Opening the report print dialog. Choose “Save to PDF” to download it.");
+    window.setTimeout(() => window.print(), 0);
   }
 
   return (
@@ -50,7 +51,7 @@ export function ReportsScreen() {
           className="px-4 py-2.5 rounded-xl bg-app-success-fill hover:bg-app-action text-app-on-action font-bold text-xs shadow transition flex items-center space-x-2"
         >
           <Download className="w-4 h-4" />
-          <span>Export PDF Report</span>
+          <span>Export / Save PDF</span>
         </button>
       </div>
 

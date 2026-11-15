@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Layers, MapPin, Pencil, Trash2 } from "lucide-react";
 
-import { MapCanvas } from "@/components/app/MapCanvas";
+import { FarmlandBoundaryEditor, type Boundary } from "@/components/farms/FarmlandBoundaryEditor";
 import { CROPS, IRRIGATION_SYSTEMS, REGIONS, type Farm } from "@/lib/farm-data";
 import {
   farmsQueryOptions,
@@ -22,7 +22,11 @@ type FormState = {
   zone: string;
   woreda: string;
   sizeHectares: string;
+  plantingDate: string;
   irrigation: string;
+  description: string;
+  farmType: string;
+  ownershipInfo: string;
 };
 
 const BLANK: FormState = {
@@ -32,7 +36,11 @@ const BLANK: FormState = {
   zone: "",
   woreda: "",
   sizeHectares: "12.0",
+  plantingDate: "",
   irrigation: IRRIGATION_SYSTEMS[0] as string,
+  description: "",
+  farmType: "Mixed farming",
+  ownershipInfo: "",
 };
 
 function farmToForm(farm: Farm): FormState {
@@ -43,7 +51,11 @@ function farmToForm(farm: Farm): FormState {
     zone: farm.zone,
     woreda: farm.woreda,
     sizeHectares: String(farm.sizeHectares),
+    plantingDate: farm.plantingDate ?? "",
     irrigation: farm.irrigation,
+    description: farm.description ?? "",
+    farmType: farm.farmType ?? "Mixed farming",
+    ownershipInfo: farm.ownershipInfo ?? "",
   };
 }
 
@@ -55,6 +67,8 @@ export function FarmsScreen() {
   const [form, setForm] = useState<FormState>(BLANK);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [boundary, setBoundary] = useState<Boundary | null>(null);
+  const [mappingMethod, setMappingMethod] = useState<"gps" | "manual">("manual");
 
   const addFarm = useAddFarm();
   const editFarm = useEditFarm();
@@ -70,12 +84,16 @@ export function FarmsScreen() {
   function startEdit(farm: Farm) {
     setEditingId(farm.id);
     setForm(farmToForm(farm));
+    setBoundary(farm.boundaryGeojson ?? null);
+    setMappingMethod(farm.mappingMethod ?? "manual");
     toast(`Editing ${farm.name}`);
   }
 
   function cancelEdit() {
     setEditingId(null);
     setForm(BLANK);
+    setBoundary(null);
+    setMappingMethod("manual");
   }
 
   function handleSubmit(event: React.FormEvent) {
@@ -87,7 +105,13 @@ export function FarmsScreen() {
       zone: form.zone.trim(),
       woreda: form.woreda.trim(),
       sizeHectares: Number(form.sizeHectares),
+      plantingDate: form.plantingDate || undefined,
       irrigation: form.irrigation,
+      description: form.description.trim(),
+      farmType: form.farmType.trim(),
+      ownershipInfo: form.ownershipInfo.trim() || undefined,
+      mappingMethod,
+      boundaryGeojson: boundary,
     };
 
     if (payload.name.length < 2) {
@@ -96,6 +120,10 @@ export function FarmsScreen() {
     }
     if (!Number.isFinite(payload.sizeHectares) || payload.sizeHectares <= 0) {
       toast.error("Plot size must be more than zero hectares.");
+      return;
+    }
+    if (!boundary) {
+      toast.error("Add and close a boundary before registering the farm.");
       return;
     }
 
@@ -136,6 +164,18 @@ export function FarmsScreen() {
     <div className="space-y-6 pb-12">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
+          <label className="block font-medium text-app-heading mb-1" htmlFor="farm-planting-date">
+            Planting Date
+          </label>
+          <input
+            id="farm-planting-date"
+            type="date"
+            value={form.plantingDate}
+            onChange={(event) => update("plantingDate", event.target.value)}
+            className="w-full p-2.5 rounded-xl border border-app-ink/20 bg-app-bg"
+          />
+        </div>
+        <div>
           <h1 className="text-2xl font-bold text-app-heading">
             Farm Registration & Boundary Management
           </h1>
@@ -165,15 +205,21 @@ export function FarmsScreen() {
             </button>
           </div>
 
-          <MapCanvas farm={active} layerType={drawing ? "Drawing Active" : "True Color"} />
+          <FarmlandBoundaryEditor
+            value={boundary}
+            onChange={setBoundary}
+            onMethodChange={setMappingMethod}
+          />
 
           <div className="p-3 bg-app-bg rounded-xl text-xs flex items-center justify-between text-app-ink/80">
             <span>
               Calculated Polygon Area:{" "}
-              <strong className="text-app-heading">{form.sizeHectares || 0} Hectares</strong>
+              <strong className="text-app-heading">
+                Calculated by the server after submission
+              </strong>
             </span>
             <span>
-              Spatial Resolution: <strong>Landsat 30-Meter Pixel Grid</strong>
+              Mapping method: <strong>{mappingMethod}</strong>
             </span>
           </div>
         </div>
@@ -184,6 +230,42 @@ export function FarmsScreen() {
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+            <div>
+              <label className="block font-medium text-app-heading mb-1" htmlFor="farm-description">
+                Description
+              </label>
+              <textarea
+                id="farm-description"
+                value={form.description}
+                onChange={(event) => update("description", event.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-app-ink/20"
+                rows={2}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block font-medium text-app-heading mb-1" htmlFor="farm-type">
+                  Farm type
+                </label>
+                <input
+                  id="farm-type"
+                  value={form.farmType}
+                  onChange={(event) => update("farmType", event.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-app-ink/20"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-app-heading mb-1" htmlFor="farm-ownership">
+                  Ownership (optional)
+                </label>
+                <input
+                  id="farm-ownership"
+                  value={form.ownershipInfo}
+                  onChange={(event) => update("ownershipInfo", event.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-app-ink/20"
+                />
+              </div>
+            </div>
             <div>
               <label className="block font-medium text-app-heading mb-1" htmlFor="farm-name">
                 Farm / Plot Name
